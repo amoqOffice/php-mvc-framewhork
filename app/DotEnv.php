@@ -12,9 +12,10 @@ class DotEnv
     protected $path;
 
 
-    public function __construct(string $path)
+    public function __construct()
     {
-        // die($path);
+        $path = realpath($_SERVER["DOCUMENT_ROOT"]).'\.env';
+        
         if(!file_exists($path)) {
             throw new \InvalidArgumentException(sprintf('%s does not exist', $path));
         }

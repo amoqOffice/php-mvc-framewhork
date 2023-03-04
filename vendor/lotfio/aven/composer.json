@@ -1,0 +1,35 @@
+{
+    "name": "lotfio/aven",
+    "description": "Robust PHP router",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "lotfio lakehal",
+            "email": "contact@lotfio.net"
+        }
+    ],
+
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    
+    "require": {
+        "php"                : "^7.2"
+    },
+
+    "require-dev":{
+        "phpunit/phpunit": "^8.0"
+    },
+
+    "autoload" : {
+        "psr-4" : {
+            "Aven\\" : "src/Aven/"
+        }
+    },
+
+    "autoload-dev":{
+
+        "psr-4":{
+            "Tests\\" : "tests/"
+        }
+    }
+}

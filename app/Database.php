@@ -4,27 +4,26 @@
 // namespace Config\DB;
 
 // use Config\DotEnv;
-include_once('dotenv.php');
-
-(new DotEnv(__DIR__ . '\..\.env'))->load();
+include_once('DotEnv.php');
+(new DotEnv())->load();
 
 $db_config = [
 	//current development environment
 	"env" => getenv('APP_ENV'),
 	//Localhost
 	"development" => [
-						"host" => getenv('DATABASE_HOST'),
-						"database" => getenv('DATABASE_NAME'),
-						"username" => getenv('DATABASE_USER'),
-						"password" => getenv('DATABASE_PASSWORD')
-					 ],
+		"host" => getenv('DATABASE_HOST'),
+		"database" => getenv('DATABASE_NAME'),
+		"username" => getenv('DATABASE_USER'),
+		"password" => getenv('DATABASE_PASSWORD')
+	],
 	//Server
 	"production"  => [
-						"host" => getenv('DATABASE_HOST'),
-						"database" => getenv('DATABASE_NAME'),
-						"username" => getenv('DATABASE_USER'),
-						"password" => getenv('DATABASE_PASSWORD')
-					 ]
+		"host" => getenv('DATABASE_HOST'),
+		"database" => getenv('DATABASE_NAME'),
+		"username" => getenv('DATABASE_USER'),
+		"password" => getenv('DATABASE_PASSWORD')
+	]
 ];
 
 class DB{

@@ -1,0 +1,5 @@
+{
+    "require": {
+        "lotfio/aven": "^0.3.0"
+    }
+}

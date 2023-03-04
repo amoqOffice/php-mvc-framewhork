@@ -1,0 +1,10 @@
+vendor/
+cache/
+.idea
+.phpintel
+composer.lock
+.phpunit.result.cache
+phpunit
+index.php
+IndexController.php
+TODO
