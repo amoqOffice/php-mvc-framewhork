@@ -1,0 +1,2 @@
+<?php
+// Controleur par defaut
