@@ -3,20 +3,20 @@ include_once('../app/Controller.php');
 
 class TestController extends Controller
 {
-    public function create($data)
+    public function create()
     {
-        die($data);
-        return $this->view('articles/index');
+        return $this->view('articles/create');
     }
 
-    // public function index(){
-    //     // On instancie le modèle "Article"
-    //     $this->loadModel('Article');
+    public function post()
+    {
+        // var_dump($_POST);
+        // die(URL.'/home');
 
-    //     // On stocke la liste des articles dans $articles
-    //     $articles = $this->Article->getAll();
+        $this->redirect(URL.'/home');
+    }
 
-    //     // On envoie les données à la vue index
-    //     $this->render('index', compact('articles'));
-    // }
+    public function index(){
+        $this->view('articles/index', ["test" => "je fais un test"]);
+    }
 }

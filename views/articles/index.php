@@ -1,3 +1,3 @@
 <?php
 
-echo 'hello index';
+die($test);

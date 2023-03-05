@@ -10,9 +10,14 @@
         return "welcome from aven";
     });
 
-    $router->get('/hola/(:str)', "TestController@create"); // controller method
+    $router->get('/form', "TestController@create");
+    $router->post('/formAction', "TestController@post")->name('form.action');
+
+    $router->get('/home', 'TestController@index')->name('home.index');
 
     $router->init(); // initialize router
 
 
     // route : https://github.com/lotfio/aven
+
+    // https://github.com/skipperbent/simple-php-router

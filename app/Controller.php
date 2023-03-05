@@ -24,4 +24,10 @@ abstract class Controller
         // On fabrique le "template"
         require_once(ROOT.'views/layout/default.php');
     }
+
+    public function redirect($url, $statusCode = 303)
+    {
+        header('Location: ' . $url, true, $statusCode);
+        die();
+    }
 }
