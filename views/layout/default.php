@@ -1,9 +1,5 @@
-<header>
-    <h1>Bienvenue sur mon blog</h1>
-</header>
+<?php include_once('header.php'); ?>
 <main>
     <?= $content ?>
 </main>
-<footer>
-    <p>Copyright 2019</p>
-</footer>
+<?php include_once('footer.php'); ?>

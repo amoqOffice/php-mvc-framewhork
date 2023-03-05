@@ -1,837 +1,815 @@
 <?php
 
-// namespace Freshsauce\Model;
+include_once('MysqliDb.php');
+
+// Model doc: https://github.com/ThingEngineer/PHP-MySQLi-Database-Class/blob/master/dbObject.md
 
 /**
- * Model ORM
+ * Mysqli Model wrapper
  *
+ * @category  Database Access
+ * @package   MysqliDb
+ * @author    Alexander V. Butenko <a.butenka@gmail.com>
+ * @copyright Copyright (c) 2015-2017
+ * @license   http://opensource.org/licenses/gpl-3.0.html GNU Public License
+ * @link      http://github.com/joshcam/PHP-MySQLi-Database-Class
+ * @version   2.9-master
  *
- *  A simple database abstraction layer for PHP 5.3+ with very minor configuration required
- *
- * database table columns are auto detected and made available as public members of the class
- * provides CRUD, dynamic counters/finders on a database table
- * uses PDO for data access and exposes PDO if required
- * class members used to do the magic are preceeded with an underscore, be careful of column names starting with _ in your database!
- * requires php >=5.3 as uses "Late Static Binding" and namespaces
- *
- *
- * @property string $created_at optional datatime in table that will automatically get updated on insert
- * @property string $updated_at optional datatime in table that will automatically get updated on insert/update
- *
- * @package default
+ * @method int count ()
+ * @method dbObject ArrayBuilder()
+ * @method dbObject JsonBuilder()
+ * @method dbObject ObjectBuilder()
+ * @method mixed byId(string $id, mixed $fields)
+ * @method mixed get(mixed $limit, mixed $fields)
+ * @method mixed getOne(mixed $fields)
+ * @method mixed paginate(int $page, array $fields)
+ * @method dbObject query($query, $numRows = null)
+ * @method dbObject rawQuery($query, $bindParams = null)
+ * @method dbObject join(string $objectName, string $key, string $joinType, string $primaryKey)
+ * @method dbObject with(string $objectName)
+ * @method dbObject groupBy(string $groupByField)
+ * @method dbObject orderBy($orderByField, $orderbyDirection = "DESC", $customFieldsOrRegExp = null)
+ * @method dbObject where($whereProp, $whereValue = 'DBNULL', $operator = '=', $cond = 'AND')
+ * @method dbObject orWhere($whereProp, $whereValue = 'DBNULL', $operator = '=')
+ * @method dbObject having($havingProp, $havingValue = 'DBNULL', $operator = '=', $cond = 'AND')
+ * @method dbObject orHaving($havingProp, $havingValue = null, $operator = null)
+ * @method dbObject setQueryOption($options)
+ * @method dbObject setTrace($enabled, $stripPrefix = null)
+ * @method dbObject withTotalCount()
+ * @method dbObject startTransaction()
+ * @method dbObject commit()
+ * @method dbObject rollback()
+ * @method dbObject ping()
+ * @method string getLastError()
+ * @method string getLastQuery()
  */
-
-/**
- * Class Model
- *
- * @package Freshsauce\Model
- */
-class Model
-{
-
-    // Class configuration
-
+class Model {
     /**
-     * @var \PDO
+     * Working instance of MysqliDb created earlier
+     *
+     * @var MysqliDb
      */
-    public static $_db; // all models inherit this db connection
-    // but can overide in a sub-class by calling subClass::connectDB(...)
-    // sub class must also redeclare public static $_db;
-
+    private $db;
     /**
-     * @var \PDOStatement[]
+     * Models path
+     *
+     * @var modelPath
      */
-    protected static $_stmt = array(); // prepared statements cache
-
+    protected static $modelPath;
     /**
-     * @var string
-     */
-    protected static $_identifier_quote_character; // character used to quote table & columns names
-
-    /**
+     * An array that holds object data
+     *
      * @var array
      */
-    private static $_tableColumns = array(); // columns in database table populated dynamically
-    // objects public members are created for each table columns dynamically
-
+    public $data;
     /**
-     * @var \stdClass all data is stored here
-     */
-    protected $data;
-
-    /**
-     * @var \stdClass whether a field value has changed (become dirty) is stored here
-     */
-    protected $dirty;
-
-    /**
-     * @var string primary key column name, set as appropriate in your sub-class
-     */
-    protected static $_primary_column_name = 'id'; // primary key column
-
-    /**
-     * @var string database table name, set as appropriate in your sub-class
-     */
-    protected static $_tableName = '_the_db_table_name_'; // database table name
-
-    /**
-     * Model constructor.
+     * Flag to define is object is new or loaded from database
      *
-     * @param array $data
+     * @var boolean
      */
-    public function __construct($data = array())
-    {
-        static::getFieldnames(); // only called once first time an object is created
-        $this->clearDirtyFields();
-        if (is_array($data)) {
-            $this->hydrate($data);
-        }
+    public $isNew = true;
+    /**
+     * Return type: 'Array' to return results as array, 'Object' as object
+     * 'Json' as json string
+     *
+     * @var string
+     */
+    public $returnType = 'Object';
+    /**
+     * An array that holds has* objects which should be loaded togeather with main
+     * object togeather with main object
+     *
+     * @var string
+     */
+    private $_with = Array();
+    /**
+     * Per page limit for pagination
+     *
+     * @var int
+     */
+    public static $pageLimit = 20;
+    /**
+     * Variable that holds total pages count of last paginate() query
+     *
+     * @var int
+     */
+    public static $totalPages = 0;
+    /**
+     * Variable which holds an amount of returned rows during paginate queries
+     * @var string
+     */
+    public static $totalCount = 0;	
+    /**
+     * An array that holds insert/update/select errors
+     *
+     * @var array
+     */
+    public $errors = null;
+    /**
+     * Primary key for an object. 'id' is a default value.
+     *
+     * @var stating
+     */
+    protected $primaryKey = 'id';
+    /**
+     * Table name for an object. Class name will be used by default
+     *
+     * @var stating
+     */
+    protected $dbTable;
+
+	/**
+	 * @var array name of the fields that will be skipped during validation, preparing & saving
+	 */
+    protected $toSkip = array();
+
+    /**
+     * @param array $data Data to preload on object creation
+     */
+    public function __construct ($data = null) {
+        // $this->db = MysqliDb::getInstance();
+        $this->db = new MysqliDb();
+        
+        if (empty ($this->dbTable))
+            $this->dbTable = get_class ($this);
+
+        if ($data)
+            $this->data = $data;
     }
 
     /**
-     * check if this object has data attached
-     *
-     * @return bool
-     */
-    public function hasData()
-    {
-        return is_object($this->data);
-    }
-
-
-    /**
-     * Returns true if data present else throws an Exception
-     *
-     * @return bool
-     * @throws \Exception
-     */
-    public function dataPresent()
-    {
-        if (!$this->hasData()) {
-            throw new \Exception('No data');
-        }
-
-        return true;
-    }
-
-    /**
-     * Set field in data object if doesnt match a native object member
-     * Initialise the data store if not an object
-     *
-     * @param string $name
-     * @param mixed  $value
-     *
-     * @return void
-     */
-    public function __set($name, $value)
-    {
-        if (!$this->hasData()) {
-            $this->data = new \stdClass();
-        }
-        $this->data->$name = $value;
-        $this->markFieldDirty($name);
-    }
-
-    /**
-     * Mark the field as dirty, so it will be set in inserts and updates
-     *
-     * @param string $name
-     */
-    public function markFieldDirty($name)
-    {
-        $this->dirty->$name = true; // field became dirty
-    }
-
-    /**
-     * Return true if filed is dirty else false
-     *
-     * @param string $name
-     *
-     * @return bool
-     */
-    public function isFieldDirty($name)
-    {
-        return isset($this->dirty->$name) && ($this->dirty->$name == true);
-    }
-
-    /**
-     * resets what fields have been considered dirty ie. been changed without being saved to the db
-     */
-    public function clearDirtyFields()
-    {
-        $this->dirty = new \stdClass();
-    }
-
-    /**
-     * Try and get the object member from the data object
-     * if it doesnt match a native object member
-     *
-     * @param string $name
+     * Magic setter function
      *
      * @return mixed
-     * @throws \Exception
      */
-    public function __get($name)
-    {
-        if (!$this->hasData()) {
-            throw new \Exception("data property=$name has not been initialised", 1);
-        }
-
-        if (property_exists($this->data, $name)) {
-            return $this->data->$name;
-        }
-
-        $trace = debug_backtrace();
-        throw new \Exception(
-            'Undefined property via __get(): ' . $name .
-            ' in ' . $trace[0]['file'] .
-            ' on line ' . $trace[0]['line'],
-            1
-        );
+    public function __set ($name, $value) {
+        if (property_exists ($this, 'hidden') && array_search ($name, $this->hidden) !== false)
+            return;
+	    
+        $this->data[$name] = $value;
     }
 
     /**
-     * Test the existence of the object member from the data object
-     * if it doesnt match a native object member
+     * Magic getter function
      *
-     * @param string $name
+     * @param $name Variable name
+     *
+     * @return mixed
+     */
+    public function __get ($name) {
+        if (property_exists ($this, 'hidden') && array_search ($name, $this->hidden) !== false)
+	    return null;
+		
+	if (isset ($this->data[$name]) && $this->data[$name] instanceof dbObject)
+            return $this->data[$name];
+
+        if (property_exists ($this, 'relations') && isset ($this->relations[$name])) {
+            $relationType = strtolower ($this->relations[$name][0]);
+            $modelName = $this->relations[$name][1];
+            switch ($relationType) {
+                case 'hasone':
+                    $key = isset ($this->relations[$name][2]) ? $this->relations[$name][2] : $name;
+                    $obj = new $modelName;
+                    $obj->returnType = $this->returnType;
+                    return $this->data[$name] = $obj->byId($this->data[$key]);
+                    break;
+                case 'hasmany':
+                    $key = $this->relations[$name][2];
+                    $obj = new $modelName;
+                    $obj->returnType = $this->returnType;
+                    return $this->data[$name] = $obj->where($key, $this->data[$this->primaryKey])->get();
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        if (isset ($this->data[$name]))
+            return $this->data[$name];
+
+        if (property_exists ($this->db, $name))
+            return $this->db->$name;
+    }
+
+    public function __isset ($name) {
+        if (isset ($this->data[$name]))
+            return isset ($this->data[$name]);
+
+        if (property_exists ($this->db, $name))
+            return isset ($this->db->$name);
+    }
+
+    public function __unset ($name) {
+        unset ($this->data[$name]);
+    }
+
+    /**
+     * Helper function to create dbObject with Json return type
+     *
+     * @return dbObject
+     */
+    private function JsonBuilder () {
+        $this->returnType = 'Json';
+        return $this;
+    }
+
+    /**
+     * Helper function to create dbObject with Array return type
+     *
+     * @return dbObject
+     */
+    private function ArrayBuilder () {
+        $this->returnType = 'Array';
+        return $this;
+    }
+
+    /**
+     * Helper function to create dbObject with Object return type.
+     * Added for consistency. Works same way as new $objname ()
+     *
+     * @return dbObject
+     */
+    private function ObjectBuilder () {
+        $this->returnType = 'Object';
+        return $this;
+    }
+
+    /**
+     * Helper function to create a virtual table class
+     *
+     * @param string tableName Table name
+     * @return dbObject
+     */
+    public static function table ($tableName) {
+        $tableName = preg_replace ("/[^-a-z0-9_]+/i",'', $tableName);
+        if (!class_exists ($tableName))
+            eval ("class $tableName extends dbObject {}");
+        return new $tableName ();
+    }
+    /**
+     * @return mixed insert id or false in case of failure
+     */
+    public function insert () {
+        if (!empty ($this->timestamps) && in_array ("createdAt", $this->timestamps))
+            $this->createdAt = date("Y-m-d H:i:s");
+        $sqlData = $this->prepareData ();
+        if (!$this->validate ($sqlData))
+            return false;
+
+        $id = $this->db->insert ($this->dbTable, $sqlData);
+        if (!empty ($this->primaryKey) && empty ($this->data[$this->primaryKey]))
+            $this->data[$this->primaryKey] = $id;
+        $this->isNew = false;
+	    $this->toSkip = array();
+        return $id;
+    }
+
+    /**
+     * @param array $data Optional update data to apply to the object
+     */
+    public function update ($data = null) {
+        if (empty ($this->dbFields))
+            return false;
+
+        if (empty ($this->data[$this->primaryKey]))
+            return false;
+
+        if ($data) {
+            foreach ($data as $k => $v) {
+	            if (in_array($k, $this->toSkip))
+		            continue;
+
+	            $this->$k = $v;
+            }
+        }
+
+        if (!empty ($this->timestamps) && in_array ("updatedAt", $this->timestamps))
+            $this->updatedAt = date("Y-m-d H:i:s");
+
+        $sqlData = $this->prepareData ();
+        if (!$this->validate ($sqlData))
+            return false;
+        
+        $this->db->where ($this->primaryKey, $this->data[$this->primaryKey]);
+	    $res = $this->db->update ($this->dbTable, $sqlData);
+	    $this->toSkip = array();
+        return $res;
+    }
+
+    /**
+     * Save or Update object
+     *
+     * @return mixed insert id or false in case of failure
+     */
+    public function save ($data = null) {
+        if ($this->isNew)
+            return $this->insert();
+        return $this->update ($data);
+    }
+
+    /**
+     * Delete method. Works only if object primaryKey is defined
+     *
+     * @return boolean Indicates success. 0 or 1.
+     */
+    public function delete () {
+        if (empty ($this->data[$this->primaryKey]))
+            return false;
+
+        $this->db->where ($this->primaryKey, $this->data[$this->primaryKey]);
+        $res = $this->db->delete ($this->dbTable);
+        $this->toSkip = array();
+        return $res;
+    }
+
+	/**
+	 * chained method that append a field or fields to skipping
+	 * @param mixed|array|false $field field name; array of names; empty skipping if false
+	 * @return $this
+	 */
+    public function skip($field){
+	    if(is_array($field)) {
+		    foreach ($field as $f) {
+			    $this->toSkip[] = $f;
+		    }
+	    } else if($field === false) {
+	    	$this->toSkip = array();
+	    } else{
+	    	$this->toSkip[] = $field;
+	    }
+	    return $this;
+    }
+
+    /**
+     * Get object by primary key.
+     *
+     * @access public
+     * @param $id Primary Key
+     * @param array|string $fields Array or coma separated list of fields to fetch
+     *
+     * @return dbObject|array
+     */
+    private function byId ($id, $fields = null) {
+        $this->db->where (MysqliDb::$prefix . $this->dbTable . '.' . $this->primaryKey, $id);
+        return $this->getOne ($fields);
+    }
+
+    /**
+     * Convinient function to fetch one object. Mostly will be togeather with where()
+     *
+     * @access public
+     * @param array|string $fields Array or coma separated list of fields to fetch
+     *
+     * @return dbObject
+     */
+    protected function first ($fields = null) {
+        $this->processHasOneWith ();
+        $results = $this->db->ArrayBuilder()->getOne ($this->dbTable, $fields);
+        if ($this->db->count == 0)
+            return null;
+
+        $this->processArrays ($results);
+        $this->data = $results;
+        $this->processAllWith ($results);
+        if ($this->returnType == 'Json')
+            return json_encode ($results);
+        if ($this->returnType == 'Array')
+            return $results;
+
+        $item = new static ($results);
+        $item->isNew = false;
+
+        return $item;
+    }
+	
+    /**
+     * A convenient SELECT COLUMN function to get a single column value from model object
+     *
+     * @param string $column    The desired column
+     * @param int    $limit     Limit of rows to select. Use null for unlimited..1 by default
+     *
+     * @return mixed Contains the value of a returned column / array of values
+     * @throws Exception
+     */
+    protected function getColumnValue ($column, $limit = 1) {
+        $res = $this->db->ArrayBuilder()->getValue ($this->dbTable, $column, $limit);
+        if (!$res)
+            return null;
+        return $res;
+    }
+
+    /**
+     * A convenient function that returns TRUE if exists at least an element that
+     * satisfy the where condition specified calling the "where" method before this one.
      *
      * @return bool
+     * @throws Exception
      */
-    public function __isset($name)
-    {
-        if ($this->hasData() && property_exists($this->data, $name)) {
-            return true;
-        }
-
-        return false;
+    protected function exist() {
+        return $this->db->has($this->dbTable);
     }
-
+	
     /**
-     * set the db connection for this and all sub-classes to use
-     * if a sub class overrides $_db it can have it's own db connection if required
-     * params are as new PDO(...)
-     * set PDO to throw exceptions on error
+     * Fetch all objects
      *
-     * @param string $dsn
-     * @param string $username
-     * @param string $password
-     * @param array  $driverOptions
+     * @access public
+     * @param integer|array $limit Array to define SQL limit in format Array ($count, $offset)
+     *                             or only $count
+     * @param array|string $fields Array or coma separated list of fields to fetch
      *
-     * @throws \Exception
+     * @return array Array of dbObjects
      */
-    public static function connectDb($dsn, $username, $password, $driverOptions = array())
-    {
-        static::$_db = new \PDO($dsn, $username, $password, $driverOptions);
-        static::$_db->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION); // Set Errorhandling to Exception
-        static::_setup_identifier_quote_character();
-    }
+    protected function get ($limit = null, $fields = null) {
+        $objects = Array ();
+        
+        $this->processHasOneWith ();
+        $results = $this->db->ArrayBuilder()->get ($this->dbTable, $limit, $fields);
+        if ($this->db->count == 0)
+            return null;
 
-    /**
-     * Detect and initialise the character used to quote identifiers
-     * (table names, column names etc).
-     *
-     * @return void
-     * @throws \Exception
-     */
-    public static function _setup_identifier_quote_character()
-    {
-        if (is_null(static::$_identifier_quote_character)) {
-            static::$_identifier_quote_character = static::_detect_identifier_quote_character();
-        }
-    }
-
-    /**
-     * Return the correct character used to quote identifiers (table
-     * names, column names etc) by looking at the driver being used by PDO.
-     *
-     * @return string
-     * @throws \Exception
-     */
-    protected static function _detect_identifier_quote_character()
-    {
-        switch (static::getDriverName()) {
-            case 'pgsql':
-            case 'sqlsrv':
-            case 'dblib':
-            case 'mssql':
-            case 'sybase':
-                return '"';
-            case 'mysql':
-            case 'sqlite':
-            case 'sqlite2':
-            default:
-                return '`';
-        }
-    }
-
-    /**
-     * return the driver name for the current database connection
-     *
-     * @return string
-     * @throws \Exception
-     */
-    protected static function getDriverName()
-    {
-        if (!static::$_db) {
-            throw new \Exception('No database connection setup');
-        }
-        return static::$_db->getAttribute(\PDO::ATTR_DRIVER_NAME);
-    }
-
-    /**
-     * Quote a string that is used as an identifier
-     * (table names, column names etc). This method can
-     * also deal with dot-separated identifiers eg table.column
-     *
-     * @param string $identifier
-     *
-     * @return string
-     */
-    protected static function _quote_identifier($identifier)
-    {
-        $class = get_called_class();
-        $parts = explode('.', $identifier);
-        $parts = array_map(array(
-            $class,
-            '_quote_identifier_part'
-        ), $parts);
-        return join('.', $parts);
-    }
-
-
-    /**
-     * This method performs the actual quoting of a single
-     * part of an identifier, using the identifier quote
-     * character specified in the config (or autodetected).
-     *
-     * @param string $part
-     *
-     * @return string
-     */
-    protected static function _quote_identifier_part($part)
-    {
-        if ($part === '*') {
-            return $part;
-        }
-        return static::$_identifier_quote_character . $part . static::$_identifier_quote_character;
-    }
-
-    /**
-     * Get and cache on first call the column names assocaited with the current table
-     *
-     * @return array of column names for the current table
-     */
-    protected static function getFieldnames()
-    {
-        $class = get_called_class();
-        if (!isset(self::$_tableColumns[$class])) {
-            $st                          = static::execute('DESCRIBE ' . static::_quote_identifier(static::$_tableName));
-            self::$_tableColumns[$class] = $st->fetchAll(\PDO::FETCH_COLUMN);
-        }
-        return self::$_tableColumns[$class];
-    }
-
-    /**
-     * Given an associative array of key value pairs
-     * set the corresponding member value if associated with a table column
-     * ignore keys which dont match a table column name
-     *
-     * @return void
-     */
-    public function hydrate($data)
-    {
-        foreach (static::getFieldnames() as $fieldname) {
-            if (isset($data[$fieldname])) {
-                $this->$fieldname = $data[$fieldname];
-            } else if (!isset($this->$fieldname)) { // PDO pre populates fields before calling the constructor, so dont null unless not set
-                $this->$fieldname = null;
+        foreach ($results as $k => &$r) {
+            $this->processArrays ($r);
+            $this->data = $r;
+            $this->processAllWith ($r, false);
+            if ($this->returnType == 'Object') {
+                $item = new static ($r);
+                $item->isNew = false;
+                $objects[$k] = $item;
             }
         }
-    }
+        $this->_with = Array();
+        if ($this->returnType == 'Object')
+            return $objects;
 
-    /**
-     * set all members to null that are associated with table columns
-     *
-     * @return void
-     */
-    public function clear()
-    {
-        foreach (static::getFieldnames() as $fieldname) {
-            $this->$fieldname = null;
-        }
-        $this->clearDirtyFields();
-    }
+        if ($this->returnType == 'Json')
+            return json_encode ($results);
 
-    /**
-     * @return array
-     */
-    public function __sleep()
-    {
-        return static::getFieldnames();
-    }
-
-    /**
-     * @return array
-     */
-    public function toArray()
-    {
-        $a = array();
-        foreach (static::getFieldnames() as $fieldname) {
-            $a[$fieldname] = $this->$fieldname;
-        }
-        return $a;
-    }
-
-    /**
-     * Get the record with the matching primary key
-     *
-     * @param string $id
-     *
-     * @return Object
-     */
-    static public function getById($id)
-    {
-        return static::fetchOneWhere(static::_quote_identifier(static::$_primary_column_name) . ' = ?', array($id));
-    }
-
-    /**
-     * Get the first record in the table
-     *
-     * @return Object
-     */
-    static public function first()
-    {
-        return static::fetchOneWhere('1=1 ORDER BY ' . static::_quote_identifier(static::$_primary_column_name) . ' ASC');
-    }
-
-    /**
-     * Get the last record in the table
-     *
-     * @return Object
-     */
-    static public function last()
-    {
-        return static::fetchOneWhere('1=1 ORDER BY ' . static::_quote_identifier(static::$_primary_column_name) . ' DESC');
-    }
-
-    /**
-     * Find records with the matching primary key
-     *
-     * @param string $id
-     *
-     * @return object[] of objects for matching records
-     */
-    static public function find($id)
-    {
-        $find_by_method = 'find_by_' . (static::$_primary_column_name);
-        static::$find_by_method($id);
-    }
-
-    /**
-     * handles calls to non-existant static methods, used to implement dynamic finder and counters ie.
-     *  find_by_name('tom')
-     *  find_by_title('a great book')
-     *  count_by_name('tom')
-     *  count_by_title('a great book')
-     *
-     * @param string $name
-     * @param string $arguments
-     *
-     * @return mixed int|object[]|object
-     * @throws \Exception
-     */
-    static public function __callStatic($name, $arguments)
-    {
-        // Note: value of $name is case sensitive.
-        if (preg_match('/^find_by_/', $name) == 1) {
-            // it's a find_by_{fieldname} dynamic method
-            $fieldname = substr($name, 8); // remove find by
-            $match     = $arguments[0];
-            return static::fetchAllWhereMatchingSingleField($fieldname, $match);
-        } else if (preg_match('/^findOne_by_/', $name) == 1) {
-            // it's a findOne_by_{fieldname} dynamic method
-            $fieldname = substr($name, 11); // remove findOne_by_
-            $match     = $arguments[0];
-            return static::fetchOneWhereMatchingSingleField($fieldname, $match, 'ASC');
-        } else if (preg_match('/^first_by_/', $name) == 1) {
-            // it's a first_by_{fieldname} dynamic method
-            $fieldname = substr($name, 9); // remove first_by_
-            $match     = $arguments[0];
-            return static::fetchOneWhereMatchingSingleField($fieldname, $match, 'ASC');
-        } else if (preg_match('/^last_by_/', $name) == 1) {
-            // it's a last_by_{fieldname} dynamic method
-            $fieldname = substr($name, 8); // remove last_by_
-            $match     = $arguments[0];
-            return static::fetchOneWhereMatchingSingleField($fieldname, $match, 'DESC');
-        } else if (preg_match('/^count_by_/', $name) == 1) {
-            // it's a count_by_{fieldname} dynamic method
-            $fieldname = substr($name, 9); // remove find by
-            $match     = $arguments[0];
-            if (is_array($match)) {
-                return static::countAllWhere(static::_quote_identifier($fieldname) . ' IN (' . static::createInClausePlaceholders($match) . ')', $match);
-            } else {
-                return static::countAllWhere(static::_quote_identifier($fieldname) . ' = ?', array($match));
-            }
-        }
-        throw new \Exception(__CLASS__ . ' not such static method[' . $name . ']');
-    }
-
-    /**
-     * find one match based on a single field and match criteria
-     *
-     * @param string       $fieldname
-     * @param string|array $match
-     * @param string       $order ASC|DESC
-     *
-     * @return object of calling class
-     */
-    public static function fetchOneWhereMatchingSingleField($fieldname, $match, $order)
-    {
-        if (is_array($match)) {
-            return static::fetchOneWhere(static::_quote_identifier($fieldname) . ' IN (' . static::createInClausePlaceholders($match) . ') ORDER BY ' . static::_quote_identifier($fieldname) . ' ' . $order, $match);
-        } else {
-            return static::fetchOneWhere(static::_quote_identifier($fieldname) . ' = ? ORDER BY ' . static::_quote_identifier($fieldname) . ' ' . $order, array($match));
-        }
-    }
-
-
-    /**
-     * find multiple matches based on a single field and match criteria
-     *
-     * @param string       $fieldname
-     * @param string|array $match
-     *
-     * @return object[] of objects of calling class
-     */
-    public static function fetchAllWhereMatchingSingleField($fieldname, $match)
-    {
-        if (is_array($match)) {
-            return static::fetchAllWhere(static::_quote_identifier($fieldname) . ' IN (' . static::createInClausePlaceholders($match) . ')', $match);
-        } else {
-            return static::fetchAllWhere(static::_quote_identifier($fieldname) . ' = ?', array($match));
-        }
-    }
-
-    /**
-     * for a given array of params to be passed to an IN clause return a string placeholder
-     *
-     * @param array $params
-     *
-     * @return string
-     */
-    static public function createInClausePlaceholders($params)
-    {
-        return implode(',', array_fill(0, count($params), '?'));
-    }
-
-    /**
-     * returns number of rows in the table
-     *
-     * @return int
-     */
-    static public function count()
-    {
-        $st = static::execute('SELECT COUNT(*) FROM ' . static::_quote_identifier(static::$_tableName));
-        return (int)$st->fetchColumn(0);
-    }
-
-    /**
-     * returns an integer count of matching rows
-     *
-     * @param string $SQLfragment conditions, grouping to apply (to right of WHERE keyword)
-     * @param array  $params      optional params to be escaped and injected into the SQL query (standrd PDO syntax)
-     *
-     * @return integer count of rows matching conditions
-     */
-    static public function countAllWhere($SQLfragment = '', $params = array())
-    {
-        $SQLfragment = self::addWherePrefix($SQLfragment);
-        $st          = static::execute('SELECT COUNT(*) FROM ' . static::_quote_identifier(static::$_tableName) . $SQLfragment, $params);
-        return (int)$st->fetchColumn(0);
-    }
-
-    /**
-     * if $SQLfragment is not empty prefix with the WHERE keyword
-     *
-     * @param string $SQLfragment
-     *
-     * @return string
-     */
-    static protected function addWherePrefix($SQLfragment)
-    {
-        return $SQLfragment ? ' WHERE ' . $SQLfragment : $SQLfragment;
-    }
-
-
-    /**
-     * returns an array of objects of the sub-class which match the conditions
-     *
-     * @param string $SQLfragment conditions, sorting, grouping and limit to apply (to right of WHERE keywords)
-     * @param array  $params      optional params to be escaped and injected into the SQL query (standrd PDO syntax)
-     * @param bool   $limitOne    if true the first match will be returned
-     *
-     * @return mixed object[]|object of objects of calling class
-     */
-    static public function fetchWhere($SQLfragment = '', $params = array(), $limitOne = false)
-    {
-        $class       = get_called_class();
-        $SQLfragment = self::addWherePrefix($SQLfragment);
-        $st          = static::execute(
-            'SELECT * FROM ' . static::_quote_identifier(static::$_tableName) . $SQLfragment . ($limitOne ? ' LIMIT 1' : ''),
-            $params
-        );
-        $st->setFetchMode(\PDO::FETCH_ASSOC);
-        if ($limitOne) {
-            $instance = new $class($st->fetch());
-            $instance->clearDirtyFields();
-            return $instance;
-        }
-        $results = [];
-        while ($row = $st->fetch()) {
-            $instance = new $class($row);
-            $instance->clearDirtyFields();
-            $results[] = $instance;
-        }
         return $results;
     }
 
     /**
-     * returns an array of objects of the sub-class which match the conditions
+     * Function to set witch hasOne or hasMany objects should be loaded togeather with a main object
      *
-     * @param string $SQLfragment conditions, sorting, grouping and limit to apply (to right of WHERE keywords)
-     * @param array  $params      optional params to be escaped and injected into the SQL query (standrd PDO syntax)
+     * @access public
+     * @param string $objectName Object Name
      *
-     * @return object[] of objects of calling class
+     * @return dbObject
      */
-    static public function fetchAllWhere($SQLfragment = '', $params = array())
-    {
-        return static::fetchWhere($SQLfragment, $params, false);
+    private function with ($objectName) {
+        if (!property_exists ($this, 'relations') || !isset ($this->relations[$objectName]))
+            die ("No relation with name $objectName found");
+
+        $this->_with[MysqliDb::$prefix.$objectName] = $this->relations[$objectName];
+
+        return $this;
     }
 
     /**
-     * returns an object of the sub-class which matches the conditions
+     * Function to join object with another object.
      *
-     * @param string $SQLfragment conditions, sorting, grouping and limit to apply (to right of WHERE keywords)
-     * @param array  $params      optional params to be escaped and injected into the SQL query (standrd PDO syntax)
+     * @access public
+     * @param string $objectName Object Name
+     * @param string $key Key for a join from primary object
+     * @param string $joinType SQL join type: LEFT, RIGHT,  INNER, OUTER
+     * @param string $primaryKey SQL join On Second primaryKey
      *
-     * @return object of calling class
+     * @return dbObject
      */
-    static public function fetchOneWhere($SQLfragment = '', $params = array())
-    {
-        return static::fetchWhere($SQLfragment, $params, true);
+    private function join ($objectName, $key = null, $joinType = 'LEFT', $primaryKey = null) {
+        $joinObj = new $objectName;
+        if (!$key)
+            $key = $objectName . "id";
+
+        if (!$primaryKey)
+            $primaryKey = MysqliDb::$prefix . $joinObj->dbTable . "." . $joinObj->primaryKey;
+		
+        if (!strchr ($key, '.'))
+            $joinStr = MysqliDb::$prefix . $this->dbTable . ".{$key} = " . $primaryKey;
+        else
+            $joinStr = MysqliDb::$prefix . "{$key} = " . $primaryKey;
+
+        $this->db->join ($joinObj->dbTable, $joinStr, $joinType);
+        return $this;
     }
 
     /**
-     * Delete a record by its primary key
+     * Function to get a total records count
      *
-     * @return boolean indicating success
+     * @return int
      */
-    static public function deleteById($id)
-    {
-        $st = static::execute(
-            'DELETE FROM ' . static::_quote_identifier(static::$_tableName) . ' WHERE ' . static::_quote_identifier(static::$_primary_column_name) . ' = ? LIMIT 1',
-            array($id)
-        );
-        return ($st->rowCount() == 1);
+    protected function count () {
+        $res = $this->db->ArrayBuilder()->getValue ($this->dbTable, "count(*)");
+        if (!$res)
+            return 0;
+        return $res;
     }
 
     /**
-     * Delete the current record
+     * Pagination wraper to get()
      *
-     * @return boolean indicating success
+     * @access public
+     * @param int $page Page number
+     * @param array|string $fields Array or coma separated list of fields to fetch
+     * @return array
      */
-    public function delete()
-    {
-        return self::deleteById($this->{static::$_primary_column_name});
-    }
-
-    /**
-     * Delete records based on an SQL conditions
-     *
-     * @param string $where  SQL fragment of conditions
-     * @param array  $params optional params to be escaped and injected into the SQL query (standrd PDO syntax)
-     *
-     * @return \PDOStatement
-     */
-    static public function deleteAllWhere($where, $params = array())
-    {
-        $st = static::execute(
-            'DELETE FROM ' . static::_quote_identifier(static::$_tableName) . ' WHERE ' . $where,
-            $params
-        );
-        return $st;
-    }
-
-    /**
-     * do any validation in this function called before update and insert
-     * should throw errors on validation failure.
-     *
-     * @return boolean true or throws exception on error
-     */
-    static public function validate()
-    {
-        return true;
-    }
-
-    /**
-     * insert a row into the database table, and update the primary key field with the one generated on insert
-     *
-     * @param boolean $autoTimestamp      true by default will set updated_at & created_at fields if present
-     * @param boolean $allowSetPrimaryKey if true include primary key field in insert (ie. you want to set it yourself)
-     *
-     * @return boolean indicating success
-     */
-    public function insert($autoTimestamp = true, $allowSetPrimaryKey = false)
-    {
-        $pk      = static::$_primary_column_name;
-        $timeStr = gmdate('Y-m-d H:i:s');
-        if ($autoTimestamp && in_array('created_at', static::getFieldnames())) {
-            $this->created_at = $timeStr;
+    private function paginate ($page, $fields = null) {
+        $this->db->pageLimit = self::$pageLimit;
+        $objects = Array ();
+        $this->processHasOneWith ();	    
+        $res = $this->db->paginate ($this->dbTable, $page, $fields);
+        self::$totalPages = $this->db->totalPages;
+	self::$totalCount = $this->db->totalCount;
+	if ($this->db->count == 0) return null;
+	    
+        foreach ($res as $k => &$r) {
+            $this->processArrays ($r);
+            $this->data = $r;
+            $this->processAllWith ($r, false);
+            if ($this->returnType == 'Object') {
+                $item = new static ($r);
+                $item->isNew = false;
+                $objects[$k] = $item;
+            }
         }
-        if ($autoTimestamp && in_array('updated_at', static::getFieldnames())) {
-            $this->updated_at = $timeStr;
-        }
-        $this->validate();
-        if ($allowSetPrimaryKey !== true) {
-            $this->$pk = null; // ensure id is null
-        }
-        $set   = $this->setString(!$allowSetPrimaryKey);
-        $query = 'INSERT INTO ' . static::_quote_identifier(static::$_tableName) . ' SET ' . $set['sql'];
-        $st    = static::execute($query, $set['params']);
-        if ($st->rowCount() == 1) {
-            $this->{static::$_primary_column_name} = static::$_db->lastInsertId();
-            $this->clearDirtyFields();
-        }
-        return ($st->rowCount() == 1);
+        $this->_with = Array();
+        if ($this->returnType == 'Object')
+            return $objects;
+
+        if ($this->returnType == 'Json')
+            return json_encode ($res);
+
+        return $res;
     }
 
     /**
-     * update the current record
+     * Catches calls to undefined methods.
      *
-     * @param boolean $autoTimestamp true by default will set updated_at field if present
+     * Provides magic access to private functions of the class and native public mysqlidb functions
      *
-     * @return boolean indicating success
+     * @param string $method
+     * @param mixed $arg
+     *
+     * @return mixed
      */
-    public function update($autoTimestamp = true)
-    {
-        if ($autoTimestamp && in_array('updated_at', static::getFieldnames())) {
-            $this->updated_at = gmdate('Y-m-d H:i:s');
-        }
-        $this->validate();
-        $set             = $this->setString();
-        $query           = 'UPDATE ' . static::_quote_identifier(static::$_tableName) . ' SET ' . $set['sql'] . ' WHERE ' . static::_quote_identifier(static::$_primary_column_name) . ' = ? LIMIT 1';
-        $set['params'][] = $this->{static::$_primary_column_name};
-        $st              = static::execute(
-            $query,
-            $set['params']
-        );
-        if ($st->rowCount() == 1) {
-            $this->clearDirtyFields();
-        }
-        return ($st->rowCount() == 1);
+    public function __call ($method, $arg) {
+        if (method_exists ($this, $method))
+            return call_user_func_array (array ($this, $method), $arg);
+
+        call_user_func_array (array ($this->db, $method), $arg);
+        return $this;
     }
 
     /**
-     * execute
-     * convenience function for setting preparing and running a database query
-     * which also uses the statement cache
+     * Catches calls to undefined static methods.
      *
-     * @param string $query  database statement with parameter place holders as PDO driver
-     * @param array  $params array of parameters to replace the placeholders in the statement
+     * Transparently creating dbObject class to provide smooth API like name::get() name::orderBy()->get()
      *
-     * @return \PDOStatement handle
+     * @param string $method
+     * @param mixed $arg
+     *
+     * @return mixed
      */
-    public static function execute($query, $params = array())
-    {
-        $st = static::_prepare($query);
-        $st->execute($params);
-        return $st;
+    public static function __callStatic ($method, $arg) {
+        $obj = new static;
+        $result = call_user_func_array (array ($obj, $method), $arg);
+        if (method_exists ($obj, $method))
+            return $result;
+        return $obj;
     }
 
     /**
-     * prepare an SQL query via PDO
+     * Converts object data to an associative array.
      *
-     * @param string $query
-     *
-     * @return \PDOStatement
+     * @return array Converted data
      */
-    protected static function _prepare($query)
-    {
-        if (!isset(static::$_stmt[$query])) {
-            // cache prepared query if not seen before
-            static::$_stmt[$query] = static::$_db->prepare($query);
+    public function toArray () {
+        $data = $this->data;
+        $this->processAllWith ($data);
+        foreach ($data as &$d) {
+            if ($d instanceof dbObject)
+                $d = $d->data;
         }
-        return static::$_stmt[$query]; // return cache copy
+        return $data;
     }
 
     /**
-     * call update if primary key field is present, else call insert
+     * Converts object data to a JSON string.
      *
-     * @return boolean indicating success
+     * @return string Converted data
      */
-    public function save()
-    {
-        if ($this->{static::$_primary_column_name}) {
-            return $this->update();
-        } else {
-            return $this->insert();
+    public function toJson () {
+        return json_encode ($this->toArray());
+    }
+
+    /**
+     * Converts object data to a JSON string.
+     *
+     * @return string Converted data
+     */
+    public function __toString () {
+        return $this->toJson ();
+    }
+
+    /**
+     * Function queries hasMany relations if needed and also converts hasOne object names
+     *
+     * @param array $data
+     */
+    private function processAllWith (&$data, $shouldReset = true) {
+        if (count ($this->_with) == 0)
+            return;
+
+        foreach ($this->_with as $name => $opts) {
+            $relationType = strtolower ($opts[0]);
+            $modelName = $opts[1];
+            if ($relationType == 'hasone') {
+                $obj = new $modelName;
+                $table = $obj->dbTable;
+                $primaryKey = $obj->primaryKey;
+				
+                if (!isset ($data[$table])) {
+                    $data[$name] = $this->$name;
+                    continue;
+                } 
+                if ($data[$table][$primaryKey] === null) {
+                    $data[$name] = null;
+                } else {
+                    if ($this->returnType == 'Object') {
+                        $item = new $modelName ($data[$table]);
+                        $item->returnType = $this->returnType;
+                        $item->isNew = false;
+                        $data[$name] = $item;
+                    } else {
+                        $data[$name] = $data[$table];
+                    }
+                }
+                unset ($data[$table]);
+            }
+            else
+                $data[$name] = $this->$name;
+        }
+        if ($shouldReset)
+            $this->_with = Array();
+    }
+
+    /*
+     * Function building hasOne joins for get/getOne method
+     */
+    private function processHasOneWith () {
+        if (count ($this->_with) == 0)
+            return;
+        foreach ($this->_with as $name => $opts) {
+            $relationType = strtolower ($opts[0]);
+            $modelName = $opts[1];
+            $key = null;
+            if (isset ($opts[2]))
+                $key = $opts[2];
+            if ($relationType == 'hasone') {
+                $this->db->setQueryOption ("MYSQLI_NESTJOIN");
+                $this->join ($modelName, $key);
+            }
         }
     }
 
     /**
-     * Create an SQL fragment to be used after the SET keyword in an SQL UPDATE
-     * escaping parameters as necessary.
-     * by default the primary key is not added to the SET string, but passing $ignorePrimary as false will add it
-     *
-     * @param boolean $ignorePrimary
-     *
-     * @return array ['sql' => string, 'params' => mixed[] ]
+     * @param array $data
      */
-    protected function setString($ignorePrimary = true)
-    {
-        // escapes and builds mysql SET string returning false, empty string or `field` = 'val'[, `field` = 'val']...
-        /**
-         * @var array $fragments individual SQL assignments
-         */
-        $fragments = array();
-        /**
-         * @var array $params values in order to insert into SQl assignment fragments
-         */
-        $params = [];
-        foreach (static::getFieldnames() as $field) {
-            if ($ignorePrimary && $field == static::$_primary_column_name) {
+    private function processArrays (&$data) {
+        if (isset ($this->jsonFields) && is_array ($this->jsonFields)) {
+            foreach ($this->jsonFields as $key)
+                $data[$key] = json_decode ($data[$key]);
+        }
+
+        if (isset ($this->arrayFields) && is_array($this->arrayFields)) {
+            foreach ($this->arrayFields as $key)
+                $data[$key] = explode ("|", $data[$key]);
+        }
+    }
+
+    /**
+     * @param array $data
+     */
+    private function validate ($data) {
+        if (!$this->dbFields)
+            return true;
+
+        foreach ($this->dbFields as $key => $desc) {
+        	if(in_array($key, $this->toSkip))
+        		continue;
+
+            $type = null;
+            $required = false;
+            if (isset ($data[$key]))
+                $value = $data[$key];
+            else
+                $value = null;
+
+            if (is_array ($value))
+                continue;
+
+            if (isset ($desc[0]))
+                $type = $desc[0];
+            if (isset ($desc[1]) && ($desc[1] == 'required'))
+                $required = true;
+
+            if ($required && strlen ($value) == 0) {
+                $this->errors[] = Array ($this->dbTable . "." . $key => "is required");
                 continue;
             }
-            if (isset($this->$field) && $this->isFieldDirty($field)) { // Only if dirty
-                if ($this->$field === null) {
-                    // if empty set to NULL
-                    $fragments[] = static::_quote_identifier($field) . ' = NULL';
-                } else {
-                    // Just set value normally as not empty string with NULL allowed
-                    $fragments[] = static::_quote_identifier($field) . ' = ?';
-                    $params[]    = $this->$field;
-                }
+            if ($value == null)
+                continue;
+
+            switch ($type) {
+                case "text":
+                    $regexp = null;
+                    break;
+                case "int":
+                    $regexp = "/^[0-9]*$/";
+                    break;
+                case "double":
+                    $regexp = "/^[0-9\.]*$/";
+                    break;
+                case "bool":
+                    $regexp = '/^(yes|no|0|1|true|false)$/i';
+                    break;
+                case "datetime":
+                    $regexp = "/^[0-9a-zA-Z -:]*$/";
+                    break;
+                default:
+                    $regexp = $type;
+                    break;
+            }
+            if (!$regexp)
+                continue;
+
+            if (!preg_match ($regexp, $value)) {
+                $this->errors[] = Array ($this->dbTable . "." . $key => "$type validation failed");
+                continue;
             }
         }
-        $sqlFragment = implode(", ", $fragments);
-        return [
-            'sql'    => $sqlFragment,
-            'params' => $params
-        ];
+        return !count ($this->errors) > 0;
     }
 
-    /**
-     * convert a date string or timestamp into a string suitable for assigning to a SQl datetime or timestamp field
+    private function prepareData () {
+        $this->errors = Array ();
+        $sqlData = Array();
+        if (count ($this->data) == 0)
+            return Array();
+
+        if (method_exists ($this, "preLoad"))
+            $this->preLoad ($this->data);
+
+        if (!$this->dbFields)
+            return $this->data;
+
+        foreach ($this->data as $key => &$value) {
+        	if(in_array($key, $this->toSkip))
+        		continue;
+
+            if ($value instanceof dbObject && $value->isNew == true) {
+                $id = $value->save();
+                if ($id)
+                    $value = $id;
+                else
+                    $this->errors = array_merge ($this->errors, $value->errors);
+            }
+
+            if (!in_array ($key, array_keys ($this->dbFields)))
+                continue;
+
+            if (!is_array($value) && !is_object($value)) {
+                $sqlData[$key] = $value;
+                continue;
+            }
+
+            if (isset ($this->jsonFields) && in_array ($key, $this->jsonFields))
+                $sqlData[$key] = json_encode($value);
+            else if (isset ($this->arrayFields) && in_array ($key, $this->arrayFields))
+                $sqlData[$key] = implode ("|", $value);
+            else
+                $sqlData[$key] = $value;
+        }
+        return $sqlData;
+    }
+
+    private static function dbObjectAutoload ($classname) {
+        $filename = static::$modelPath . $classname .".php";
+        if (file_exists ($filename))
+            include ($filename);
+    }
+
+    /*
+     * Enable models autoload from a specified path
      *
-     * @param mixed $dt a date string or a unix timestamp
+     * Calling autoload() without path will set path to dbObjectPath/models/ directory
      *
-     * @return string
+     * @param string $path
      */
-    public static function datetimeToMysqldatetime($dt)
-    {
-        $dt = (is_string($dt)) ? strtotime($dt) : $dt;
-        return date('Y-m-d H:i:s', $dt);
+    public static function autoload ($path = null) {
+        if ($path)
+            static::$modelPath = $path . "/";
+        else
+            static::$modelPath = __DIR__ . "/models/";
+        spl_autoload_register ("dbObject::dbObjectAutoload");
     }
 }
-
